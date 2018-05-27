@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with go-ethereum. If not, see <http://www.gnu.org/licenses/>.
 
-// geth is the official command-line client for Ethereum.
+// tomo is the official command-line client for Ethereum.
 package main
 
 import (
@@ -28,6 +28,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/console"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -39,12 +41,14 @@ import (
 )
 
 const (
-	clientIdentifier = "geth" // Client identifier to advertise over the network
+	clientIdentifier = "tomo" // Client identifier to advertise over the network
 )
 
 var (
 	// Git SHA1 commit hash of the release (set via linker flags)
 	gitCommit = ""
+	// Ethereum address of the Geth release oracle.
+	relOracle = common.HexToAddress("0xfa7b9770ca4cb04296cac84f37736d4041251cdf")
 	// The app that holds all commands and flags.
 	app = utils.NewApp(gitCommit, "the go-ethereum command line interface")
 	// flags that configure the node
@@ -143,8 +147,8 @@ var (
 )
 
 func init() {
-	// Initialize the CLI app and start Geth
-	app.Action = geth
+	// Initialize the CLI app and start tomo
+	app.Action = tomo
 	app.HideVersion = true // we have a command to print the version
 	app.Copyright = "Copyright 2013-2017 The go-ethereum Authors"
 	app.Commands = []cli.Command{
@@ -209,10 +213,10 @@ func main() {
 	}
 }
 
-// geth is the main entry point into the system if no special subcommand is ran.
+// tomo is the main entry point into the system if no special subcommand is ran.
 // It creates a default node based on the command line arguments and runs it in
 // blocking mode, waiting for it to be shut down.
-func geth(ctx *cli.Context) error {
+func tomo(ctx *cli.Context) error {
 	node := makeFullNode(ctx)
 	startNode(ctx, node)
 	node.Wait()
@@ -287,19 +291,69 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 		if err := stack.Service(&ethereum); err != nil {
 			utils.Fatalf("Ethereum service not running: %v", err)
 		}
-		// Use a reduced number of threads if requested
-		if threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name); threads > 0 {
-			type threaded interface {
-				SetThreads(threads int)
+		go func() {
+			started := false
+			ok, err := ethereum.ValidateMiner()
+			if err != nil {
+				utils.Fatalf("Can't verify validator permission: %v", err)
 			}
-			if th, ok := ethereum.Engine().(threaded); ok {
-				th.SetThreads(threads)
+			if ok {
+				log.Info("Validator found. Enabling mining mode...")
+				// Use a reduced number of threads if requested
+				if threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name); threads > 0 {
+					type threaded interface {
+						SetThreads(threads int)
+					}
+					if th, ok := ethereum.Engine().(threaded); ok {
+						th.SetThreads(threads)
+					}
+				}
+				// Set the gas price to the limits from the CLI and start mining
+				ethereum.TxPool().SetGasPrice(utils.GlobalBig(ctx, utils.GasPriceFlag.Name))
+				if err := ethereum.StartMining(true); err != nil {
+					utils.Fatalf("Failed to start mining: %v", err)
+				}
+				started = true
+				log.Info("Enabled mining node!!!")
 			}
-		}
-		// Set the gas price to the limits from the CLI and start mining
-		ethereum.TxPool().SetGasPrice(utils.GlobalBig(ctx, utils.GasPriceFlag.Name))
-		if err := ethereum.StartMining(true); err != nil {
-			utils.Fatalf("Failed to start mining: %v", err)
-		}
+			defer close(clique.Checkpoint)
+
+			for {
+				select {
+				case _ = <-clique.Checkpoint:
+					log.Info("Checkpoint!!! It's time to reconcile node's state...")
+					ok, err := ethereum.ValidateMiner()
+					if err != nil {
+						utils.Fatalf("Can't verify validator permission: %v", err)
+					}
+					if !ok {
+						log.Info("Only validator can mine blocks. Cancelling mining on this node...")
+						if started {
+							ethereum.StopMining()
+							started = false
+						}
+						log.Info("Cancelled mining mode!!!")
+					} else if !started {
+						log.Info("Validator found. Enabling mining mode...")
+						// Use a reduced number of threads if requested
+						if threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name); threads > 0 {
+							type threaded interface {
+								SetThreads(threads int)
+							}
+							if th, ok := ethereum.Engine().(threaded); ok {
+								th.SetThreads(threads)
+							}
+						}
+						// Set the gas price to the limits from the CLI and start mining
+						ethereum.TxPool().SetGasPrice(utils.GlobalBig(ctx, utils.GasPriceFlag.Name))
+						if err := ethereum.StartMining(true); err != nil {
+							utils.Fatalf("Failed to start mining: %v", err)
+						}
+						started = true
+						log.Info("Enabled mining node!!!")
+					}
+				}
+			}
+		}()
 	}
 }

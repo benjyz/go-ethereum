@@ -65,6 +65,7 @@ var (
 
 	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
+	Checkpoint chan int
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -216,6 +217,7 @@ func New(config *params.CliqueConfig, db ethdb.Database) *Clique {
 	if conf.Epoch == 0 {
 		conf.Epoch = epochLength
 	}
+	Checkpoint = make(chan int)
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
@@ -277,9 +279,6 @@ func (c *Clique) verifyHeader(chain consensus.ChainReader, header *types.Header,
 	}
 	// Checkpoint blocks need to enforce zero beneficiary
 	checkpoint := (number % c.config.Epoch) == 0
-	if checkpoint && header.Coinbase != (common.Address{}) {
-		return errInvalidCheckpointBeneficiary
-	}
 	// Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
 	if !bytes.Equal(header.Nonce[:], nonceAuthVote) && !bytes.Equal(header.Nonce[:], nonceDropVote) {
 		return errInvalidVote
@@ -365,6 +364,16 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainReader, header *type
 	}
 	// All basic checks passed, verify the seal and return
 	return c.verifySeal(chain, header, parents)
+}
+
+func (c *Clique) GetSnapshot(chain consensus.ChainReader, header *types.Header) (*Snapshot, error) {
+	number := header.Number.Uint64()
+	log.Trace("take snapshot", "number", number, "hash", header.Hash())
+	snap, err := c.snapshot(chain, number, header.Hash(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return snap, nil
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
@@ -570,6 +579,13 @@ func (c *Clique) Prepare(chain consensus.ChainReader, header *types.Header) erro
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given, and returns the final block.
 func (c *Clique) Finalize(chain consensus.ChainReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+	// set block reward
+	// FIXME: unit Ether could be too plump
+	chainReward := new(big.Int).SetUint64(chain.Config().Clique.Reward * params.Ether)
+
+	reward := new(big.Int).Set(chainReward)
+	state.AddBalance(header.Coinbase, reward)
+
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 	header.UncleHash = types.CalcUncleHash(nil)
