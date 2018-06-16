@@ -95,7 +95,6 @@ var (
 		utils.MaxPendingPeersFlag,
 		utils.EtherbaseFlag,
 		utils.GasPriceFlag,
-		utils.MinerThreadsFlag,
 		utils.MiningEnabledFlag,
 		utils.TargetGasLimitFlag,
 		utils.NATFlag,
@@ -147,7 +146,7 @@ func init() {
 	// Initialize the CLI app and start tomo
 	app.Action = tomo
 	app.HideVersion = true // we have a command to print the version
-	app.Copyright = "Copyright 2013-2017 The go-ethereum Authors"
+	app.Copyright = "Copyright 2013-2017 The go-ethereum Authors\n2017 Tomochain Authors"
 	app.Commands = []cli.Command{
 		// See chaincmd.go:
 		initCommand,
@@ -214,6 +213,7 @@ func main() {
 // It creates a default node based on the command line arguments and runs it in
 // blocking mode, waiting for it to be shut down.
 func tomo(ctx *cli.Context) error {
+	log.Info("Start main. context: ", ctx)
 	node := makeFullNode(ctx)
 	startNode(ctx, node)
 	node.Wait()
@@ -297,7 +297,9 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 			if ok {
 				log.Info("Validator found. Enabling mining mode...")
 				// Use a reduced number of threads if requested
-				if threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name); threads > 0 {
+				//ctx.GlobalInt(utils.MinerThreadsFlag.Name)
+				numThreads := 1
+				if threads := numThreads; threads > 0 {
 					type threaded interface {
 						SetThreads(threads int)
 					}
@@ -329,16 +331,6 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 					}
 					log.Info("Cancelled mining mode!!!")
 				} else if !started {
-					log.Info("Validator found. Enabling mining mode...")
-					// Use a reduced number of threads if requested
-					if threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name); threads > 0 {
-						type threaded interface {
-							SetThreads(threads int)
-						}
-						if th, ok := ethereum.Engine().(threaded); ok {
-							th.SetThreads(threads)
-						}
-					}
 					// Set the gas price to the limits from the CLI and start mining
 					ethereum.TxPool().SetGasPrice(utils.GlobalBig(ctx, utils.GasPriceFlag.Name))
 					if err := ethereum.StartMining(true); err != nil {
