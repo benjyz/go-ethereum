@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -29,6 +30,7 @@ func TestValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("can't get candidates: %v", err)
 	}
+	t.Log("candidates ", len(candidates))
 	for _, it := range candidates {
 		cap, _ := validator.GetCandidateCap(it)
 		t.Log("candidate", it.String(), "cap", cap)
@@ -36,4 +38,11 @@ func TestValidator(t *testing.T) {
 		t.Log("candidate", it.String(), "validator owner", owner.String())
 	}
 	contractBackend.Commit()
+
+	//someaddr := new common.addr{"0xf99805B536609cC03AcBB2604dFaC11E9E54a448"}
+	//signers[common.HexToAddress("0x12f588d7d03bb269b382b842fc15d874e8c055a7")] = &rewardLog{5, new(big.Int).SetUint64(0)}
+	someaddr := common.HexToAddress("0x31b249fE6F267aa2396Eb2DC36E9c79351d97Ec5")
+	validator.Resign(someaddr)
+	ncandidates, err := validator.GetCandidates()
+	t.Log("candidates ", len(ncandidates))
 }
