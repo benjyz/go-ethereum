@@ -293,7 +293,6 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 			utils.Fatalf("Ethereum service not running: %v", err)
 		}
 		go func() {
-			started := false
 			ok, err := ethereum.ValidateStaker()
 			if err != nil {
 				utils.Fatalf("Can't verify validator permission: %v", err)
@@ -314,7 +313,6 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 				if err := ethereum.StartStaking(true); err != nil {
 					utils.Fatalf("Failed to start staking: %v", err)
 				}
-				started = true
 				log.Info("Enabled staking node!!!")
 			}
 			defer close(core.CheckpointCh)
@@ -328,13 +326,12 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 						utils.Fatalf("Can't verify masternode permission: %v", err)
 					}
 					if !ok {
-						if started {
+						if ethereum.IsStaking() {
 							log.Info("Only masternode can propose and verify blocks. Cancelling staking on this node...")
 							ethereum.StopStaking()
-							started = false
 							log.Info("Cancelled mining mode!!!")
 						}
-					} else if !started {
+					} else if !ethereum.IsStaking() {
 						log.Info("Masternode found. Enabling staking mode...")
 						// Use a reduced number of threads if requested
 						if threads := ctx.GlobalInt(utils.StakerThreadsFlag.Name); threads > 0 {
@@ -350,7 +347,6 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 						if err := ethereum.StartStaking(true); err != nil {
 							utils.Fatalf("Failed to start staking: %v", err)
 						}
-						started = true
 						log.Info("Enabled staking node!!!")
 					}
 				case <-core.M1Ch:
